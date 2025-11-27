@@ -3,7 +3,7 @@
  * Integrated layout with full Markdown functionality (CodeMirror 6) and Terminal Support
  */
 
-const path = require('path'); // ★追加: パス操作用
+const path = require('path');
 const { EditorState, Prec, Compartment, Annotation } = require("@codemirror/state");
 const { EditorView, keymap, highlightActiveLine, lineNumbers } = require("@codemirror/view");
 const { defaultKeymap, history, historyKeymap, undo, redo, indentMore, indentLess } = require("@codemirror/commands");
@@ -273,6 +273,9 @@ function openSettingsTab() {
         settingsTab.dataset.target = 'content-settings';
         settingsTab.innerHTML = '設定 <span class="close-tab" id="close-settings-tab">×</span>';
 
+        // ★追加: ドラッグ可能にする
+        makeTabDraggable(settingsTab);
+
         if (editorTabsContainer) {
             editorTabsContainer.appendChild(settingsTab);
         }
@@ -280,6 +283,59 @@ function openSettingsTab() {
 
     // ビューを切り替え
     switchMainView('content-settings');
+}
+
+// ========== タブのドラッグ&ドロップ機能 ==========
+let draggedTab = null;
+
+function makeTabDraggable(tab) {
+    tab.setAttribute('draggable', 'true');
+
+    // ドラッグ開始
+    tab.addEventListener('dragstart', (e) => {
+        draggedTab = tab;
+        tab.classList.add('dragging');
+        e.dataTransfer.effectAllowed = 'move';
+        console.log('[Tab Drag] Started:', tab.textContent.trim());
+    });
+
+    // ドラッグ終了
+    tab.addEventListener('dragend', (e) => {
+        tab.classList.remove('dragging');
+        draggedTab = null;
+        console.log('[Tab Drag] Ended');
+    });
+
+    // ドラッグオーバー (並べ替えロジック)
+    tab.addEventListener('dragover', (e) => {
+        e.preventDefault(); // ドロップを許可するために必要
+        e.dataTransfer.dropEffect = 'move';
+
+        if (!draggedTab || draggedTab === tab) return;
+
+        const container = document.getElementById('editor-tabs');
+        const box = tab.getBoundingClientRect();
+        // タブの中心座標を計算
+        const offset = e.clientX - box.left - box.width / 2;
+
+        // マウスがタブの左側にあれば前に、右側にあれば後ろに挿入
+        if (offset < 0) {
+            // 前に挿入（ただし、既に直前にある場合は何もしない）
+            if (tab.previousElementSibling !== draggedTab) {
+                container.insertBefore(draggedTab, tab);
+            }
+        } else {
+            // 後ろに挿入（ただし、既に直後にある場合は何もしない）
+            if (tab.nextElementSibling !== draggedTab) {
+                container.insertBefore(draggedTab, tab.nextSibling);
+            }
+        }
+    });
+
+    // ドロップ (処理自体はdragoverで行っているがイベントはキャンセルする)
+    tab.addEventListener('drop', (e) => {
+        e.preventDefault();
+    });
 }
 
 // ========== CodeMirror Initialization (LiveMark機能の統合) ==========
@@ -2416,6 +2472,10 @@ async function openFile(filePath, fileName) {
             tab.className = 'tab';
             tab.dataset.filepath = normalizedPath;
             tab.innerHTML = `${fileName} <span class="close-tab" data-filepath="${normalizedPath}">×</span>`;
+            
+            // ★追加: ドラッグ可能にする
+            makeTabDraggable(tab);
+
             editorTabsContainer.appendChild(tab);
             openedFiles.set(normalizedPath, { content: fileContent, fileName: fileName });
         }
@@ -2439,6 +2499,9 @@ function showWelcomeReadme() {
     tab.className = 'tab';
     tab.dataset.filepath = readmePath;
     tab.innerHTML = `README.md`;
+
+    // ★追加: ドラッグ可能にする
+    makeTabDraggable(tab);
 
     if (editorTabsContainer) {
         editorTabsContainer.appendChild(tab);

@@ -242,6 +242,13 @@ body[data-theme="dark"] .side-switch-group button:hover {
     border-bottom: none;
 }
 
+/* ★追加: ドラッグ中のタブのスタイル */
+.editor-tabs .tab.dragging {
+    opacity: 0.5;
+    background-color: var(--sidebar-bg);
+    cursor: grabbing; /* ドラッグ中のカーソル */
+}
+
 .editor-tabs .tab .close-tab {
     font-size: 14px;
     border-radius: 50%;
