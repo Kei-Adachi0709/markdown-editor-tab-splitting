@@ -534,6 +534,20 @@ class Pane {
         });
     }
 
+    // ★追加: ペインの破棄処理（メモリリーク防止）
+    destroy() {
+        console.log(`[Pane] Destroying pane ${this.id}`);
+        if (this.editorView) {
+            this.editorView.destroy();
+            this.editorView = null;
+        }
+        // DOM要素の削除
+        if (this.element && this.element.parentNode) {
+            this.element.parentNode.removeChild(this.element);
+        }
+        this.element = null;
+    }
+
     updateTabs() {
         this.tabsContainer.innerHTML = '';
         this.files.forEach(filePath => {
@@ -594,6 +608,7 @@ class Pane {
     }
 
     // ★修正: isMoving フラグを追加して、移動時は未保存状態を消さないようにする
+    // ★追加: ファイルリストが空になったらペインを削除する
     closeFile(filePath, isMoving = false) {
         const index = this.files.indexOf(filePath);
         if (index > -1) {
@@ -625,6 +640,14 @@ class Pane {
                 // 完全に閉じる場合のみ削除
                 openedFiles.delete(filePath);
                 fileModificationState.delete(filePath); // 未保存フラグも削除
+            }
+        }
+
+        // ★追加: ファイルが0になったらペイン削除をリクエスト
+        if (this.files.length === 0) {
+            console.log(`[Pane] Pane ${this.id} is now empty.`);
+            if (typeof layoutManager !== 'undefined') {
+                layoutManager.removePane(this.id);
             }
         }
     }
@@ -699,10 +722,86 @@ class LayoutManager {
         return id;
     }
 
+    // ★追加: ペイン削除とレイアウト統合機能
+    removePane(paneId) {
+        console.log(`[LayoutManager] Request to remove pane: ${paneId}`);
+
+        // 最後の1つのペインは削除しない
+        if (this.panes.size <= 1) {
+            console.log('[LayoutManager] Cannot remove last remaining pane.');
+            return;
+        }
+
+        const paneToRemove = this.panes.get(paneId);
+        if (!paneToRemove) {
+            console.warn(`[LayoutManager] Pane ${paneId} not found.`);
+            return;
+        }
+
+        const paneElement = paneToRemove.element;
+        const parentContainer = paneElement.parentElement; // split-container または pane-root
+
+        // ルート直下の場合（panes.size > 1なら通常はsplit-container内だが、念のため）
+        if (!parentContainer.classList.contains('split-container')) {
+            console.warn('[LayoutManager] Cannot remove pane directly under root if multiple panes exist (structure mismatch).');
+            return;
+        }
+
+        // 親コンテナ (split-container) と、その親 (grandParent) を取得
+        const grandParent = parentContainer.parentElement;
+        
+        // split-containerには「削除するペイン」と「残る兄弟要素」の2つがあるはず
+        const sibling = Array.from(parentContainer.children).find(child => child !== paneElement);
+        
+        if (!sibling) {
+            console.error('[LayoutManager] Sibling element not found in split-container.');
+            return;
+        }
+
+        console.log('[LayoutManager] Collapsing split container. Promoting sibling element.');
+
+        // DOM操作: grandParent内の parentContainer(split-container) を sibling で置き換える
+        // これにより split-container が消滅し、残ったペイン（またはコンテナ）が親階層に昇格する
+        grandParent.replaceChild(sibling, parentContainer);
+
+        // ペインのクリーンアップ
+        paneToRemove.destroy();
+        this.panes.delete(paneId);
+
+        // アクティブペインの再設定
+        // 削除したペインがアクティブだった場合、代わりのペインをアクティブにする
+        if (this.activePaneId === paneId) {
+            let newActiveId = null;
+
+            // sibling自体がペインの場合
+            if (sibling.classList.contains('pane')) {
+                newActiveId = sibling.dataset.id;
+            } else {
+                // siblingがコンテナの場合、その中の最初のペインを探す（深さ優先）
+                const firstPaneEl = sibling.querySelector('.pane');
+                if (firstPaneEl) {
+                    newActiveId = firstPaneEl.dataset.id;
+                }
+            }
+
+            if (newActiveId) {
+                console.log(`[LayoutManager] Setting active pane to ${newActiveId}`);
+                this.setActivePane(newActiveId);
+            } else {
+                // フォールバック: マップ内の適当なペインを選択
+                const fallbackId = this.panes.keys().next().value;
+                if (fallbackId) {
+                    console.log(`[LayoutManager] Fallback active pane to ${fallbackId}`);
+                    this.setActivePane(fallbackId);
+                }
+            }
+        }
+    }
+
     setActivePane(id) {
         if (this.activePaneId) {
             const prevPane = this.panes.get(this.activePaneId);
-            if (prevPane) prevPane.element.classList.remove('active');
+            if (prevPane && prevPane.element) prevPane.element.classList.remove('active');
         }
         this.activePaneId = id;
         const nextPane = this.panes.get(id);
@@ -829,6 +928,7 @@ class LayoutManager {
                     
                     const sourcePane = this.panes.get(this.dragSource.paneId);
                     // ★修正: 移動フラグをtrueにして閉じる（未保存状態を維持）
+                    // sourcePane.closeFile 内で files が空になれば removePane が呼ばれる
                     sourcePane.closeFile(this.dragSource.filePath, true);
                     
                     this.setActivePane(targetPaneId);
