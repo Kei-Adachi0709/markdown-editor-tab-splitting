@@ -722,7 +722,7 @@ class LayoutManager {
         return id;
     }
 
-    // ★追加: ペイン削除とレイアウト統合機能
+    // ★追加: ペイン削除とレイアウト統合機能（修正版）
     removePane(paneId) {
         console.log(`[LayoutManager] Request to remove pane: ${paneId}`);
 
@@ -739,10 +739,10 @@ class LayoutManager {
         }
 
         const paneElement = paneToRemove.element;
-        const parentContainer = paneElement.parentElement; // split-container または pane-root
+        const parentContainer = paneElement.parentElement; // split-container
 
         // ルート直下の場合（panes.size > 1なら通常はsplit-container内だが、念のため）
-        if (!parentContainer.classList.contains('split-container')) {
+        if (!parentContainer || !parentContainer.classList.contains('split-container')) {
             console.warn('[LayoutManager] Cannot remove pane directly under root if multiple panes exist (structure mismatch).');
             return;
         }
@@ -750,14 +750,19 @@ class LayoutManager {
         // 親コンテナ (split-container) と、その親 (grandParent) を取得
         const grandParent = parentContainer.parentElement;
         
-        // split-containerには「削除するペイン」と「残る兄弟要素」の2つがあるはず
-        const sibling = Array.from(parentContainer.children).find(child => child !== paneElement);
+        // 兄弟要素（残る方）を特定。単に !== paneElement だけでなくクラスも確認
+        // split-container には2つの要素（paneまたはsplit-container）が入っているはず
+        const sibling = Array.from(parentContainer.children).find(child => 
+            child !== paneElement && 
+            (child.classList.contains('pane') || child.classList.contains('split-container'))
+        );
         
         if (!sibling) {
             console.error('[LayoutManager] Sibling element not found in split-container.');
             return;
         }
 
+        console.log('[LayoutManager] Removing pane:', paneId);
         console.log('[LayoutManager] Collapsing split container. Promoting sibling element.');
 
         // DOM操作: grandParent内の parentContainer(split-container) を sibling で置き換える
@@ -767,6 +772,10 @@ class LayoutManager {
         // ペインのクリーンアップ
         paneToRemove.destroy();
         this.panes.delete(paneId);
+
+        // ★重要: レイアウト変更後の強制リフレッシュ
+        // 昇格した要素（sibling）以下のすべてのペインに対して requestMeasure を呼ぶ
+        this.refreshLayout(sibling);
 
         // アクティブペインの再設定
         // 削除したペインがアクティブだった場合、代わりのペインをアクティブにする
@@ -796,6 +805,31 @@ class LayoutManager {
                 }
             }
         }
+    }
+
+    // ★追加: 指定要素以下のすべてのペインのエディタをリフレッシュするヘルパー
+    refreshLayout(rootElement) {
+        console.log('[LayoutManager] Refreshing layout for:', rootElement);
+        const panesToRefresh = [];
+        
+        // rootElement自体がpaneの場合
+        if (rootElement.classList.contains('pane')) {
+            panesToRefresh.push(rootElement);
+        }
+        
+        // 子孫のpaneを取得
+        const childPanes = rootElement.querySelectorAll('.pane');
+        childPanes.forEach(p => panesToRefresh.push(p));
+
+        panesToRefresh.forEach(paneEl => {
+            const id = paneEl.dataset.id;
+            const pane = this.panes.get(id);
+            if (pane && pane.editorView) {
+                // CodeMirrorにレイアウト計測を要求し、再描画させる
+                pane.editorView.requestMeasure();
+                console.log(`[LayoutManager] Requested measure for pane ${id}`);
+            }
+        });
     }
 
     setActivePane(id) {
