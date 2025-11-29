@@ -1,6 +1,7 @@
 /**
  * Markdown IDE - Main Renderer Process
  * Integrated layout with full Markdown functionality (CodeMirror 6) and Terminal Support
+ * Refactored LayoutManager for robust split/merge behavior.
  */
 
 const path = require('path');
@@ -132,7 +133,7 @@ const shellDropdown = document.getElementById('shell-dropdown');
 
 // File System State
 let currentDirectoryPath = null;
-let openedFiles = new Map();
+let openedFiles = new Map(); // Map<filePath, {content: string, fileName: string}>
 let fileModificationState = new Map();
 let currentSortOrder = 'asc';
 
@@ -418,16 +419,18 @@ const pasteHandler = EditorView.domEventHandlers({
     }
 });
 
+// ドロップ時のデフォルト動作防止
 const dropHandler = EditorView.domEventHandlers({
     drop(event, view) {
+        // タブ移動のデータが含まれているかチェック
         const data = event.dataTransfer.getData('text/plain');
         try {
             const parsed = JSON.parse(data);
             if (parsed && parsed.paneId && parsed.filePath) {
+                // LayoutManagerに任せる
                 return true; 
             }
-        } catch (e) {
-        }
+        } catch (e) {}
         return false;
     }
 });
@@ -446,6 +449,10 @@ class Pane {
         this.element = document.createElement('div');
         this.element.className = 'pane';
         this.element.dataset.id = id;
+        
+        // Flexboxで等分に広がるように初期設定
+        this.element.style.flex = '1';
+
         this.element.addEventListener('click', () => {
             if (typeof layoutManager !== 'undefined') {
                 layoutManager.setActivePane(this.id);
@@ -598,6 +605,7 @@ class Pane {
         this.updateTabs();
     }
 
+    // ファイルを閉じる。isMoving=trueならタブ移動中なので削除しない
     closeFile(filePath, isMoving = false) {
         const index = this.files.indexOf(filePath);
         if (index > -1) {
@@ -628,9 +636,11 @@ class Pane {
             }
         }
 
+        // ファイルが空になったらペイン自体を削除する（ただし最後の1つを除く）
         if (this.files.length === 0) {
             console.log(`[Pane] Pane ${this.id} is now empty.`);
             if (typeof layoutManager !== 'undefined') {
+                // LayoutManager側で最後の1つかどうか判断して処理する
                 layoutManager.removePane(this.id);
             }
         }
@@ -673,24 +683,28 @@ class Pane {
     }
 }
 
+// ========== Layout Manager (Refactored) ==========
+
 class LayoutManager {
     constructor() {
         this.panes = new Map();
         this.activePaneId = null;
         this.paneCounter = 0;
         this.rootContainer = document.getElementById('pane-root');
-        this.dragSource = null;
+        this.dragSource = null; // { paneId, filePath }
     }
 
     init() {
-        console.log('[LayoutManager] Initializing root pane');
-        this.initRoot();
-        this.setupDragDrop();
-    }
-
-    initRoot() {
+        console.log('[LayoutManager] Initializing...');
+        // DOMのクリア
+        this.rootContainer.innerHTML = '';
+        this.panes.clear();
+        
+        // 初期ペインの作成
         const initialPaneId = this.createPane(this.rootContainer);
         this.setActivePane(initialPaneId);
+        
+        this.setupDragDrop();
     }
 
     createPane(container) {
@@ -700,112 +714,84 @@ class LayoutManager {
         return id;
     }
 
-    // ★修正: ペイン削除時にスタイルを確実にリセットして全画面に戻す
+    // 指定されたペインを削除し、レイアウトを統合する（核心部分）
     removePane(paneId) {
-        console.log(`[LayoutManager] Request to remove pane: ${paneId}`);
+        const pane = this.panes.get(paneId);
+        if (!pane) return;
 
-        if (this.panes.size <= 1) {
-            console.log('[LayoutManager] Cannot remove last remaining pane.');
+        // ルート直下の要素は削除しない（最後の1つのペイン）
+        if (pane.element.parentNode === this.rootContainer) {
+            console.log('[LayoutManager] Cannot remove last pane.');
+            // ファイルがない場合、空の状態にするだけで維持する
+            if (pane.files.length === 0) {
+                 pane.setEditorContent("");
+            }
             return;
         }
 
-        const paneToRemove = this.panes.get(paneId);
-        if (!paneToRemove) {
-            console.warn(`[LayoutManager] Pane ${paneId} not found.`);
-            return;
-        }
+        const parentSplit = pane.element.parentNode; // .split-container
+        const grandParent = parentSplit.parentNode;  // .split-container or #pane-root
 
-        const paneElement = paneToRemove.element;
-        const parentContainer = paneElement.parentElement; // split-container
+        // 親コンテナ内の兄弟要素（残る要素）を探す
+        const sibling = Array.from(parentSplit.children).find(el => el !== pane.element);
 
-        if (!parentContainer || !parentContainer.classList.contains('split-container')) {
-            console.warn('[LayoutManager] Cannot remove pane directly under root if multiple panes exist.');
-            return;
-        }
-
-        const grandParent = parentContainer.parentElement;
-        
-        const sibling = Array.from(parentContainer.children).find(child => 
-            child !== paneElement && 
-            (child.classList.contains('pane') || child.classList.contains('split-container'))
-        );
-        
         if (!sibling) {
-            console.error('[LayoutManager] Sibling element not found in split-container.');
+            console.error('[LayoutManager] Error: Sibling not found for removal.');
             return;
         }
 
-        console.log(`[LayoutManager] Promoting sibling: ${sibling.className} (id: ${sibling.dataset.id || 'container'})`);
-        console.log('[LayoutManager] Clearing sibling styles before promotion...');
+        console.log(`[LayoutManager] Removing ${paneId}, Promoting sibling...`);
 
-        // ★重要: 昇格する要素のスタイル（リサイズ等で付与されたもの）を確実に消去する
-        // これをしないと、width: 50% などが残って全画面にならない
+        // 1. 昇格する兄弟要素のスタイルを完全にリセットする
+        // これにより、親コンテナいっぱいに広がるようになる
         sibling.style.width = '';
         sibling.style.height = '';
-        sibling.style.flex = '';
+        sibling.style.flex = '1';
         sibling.style.flexBasis = '';
         sibling.style.flexGrow = '';
         sibling.style.flexShrink = '';
 
-        // DOM置換: 親コンテナを削除し、兄弟要素を親の親に直結させる
-        grandParent.replaceChild(sibling, parentContainer);
+        // 2. DOMの置換: 親コンテナ(split-container)を、兄弟要素で置き換える
+        // これにより、不要になった split-container が消滅し、ネストが解消される
+        grandParent.replaceChild(sibling, parentSplit);
 
-        // ペインオブジェクトの破棄
-        paneToRemove.destroy();
+        // 3. 削除対象のペインを破棄
+        pane.destroy();
         this.panes.delete(paneId);
 
-        // アクティブペインの調整
+        // 4. もし削除したペインがアクティブだった場合、代わりのアクティブペインを決める
         if (this.activePaneId === paneId) {
-            let newActiveId = null;
-            if (sibling.classList.contains('pane')) {
-                newActiveId = sibling.dataset.id;
-            } else {
-                const firstPaneEl = sibling.querySelector('.pane');
-                if (firstPaneEl) newActiveId = firstPaneEl.dataset.id;
-            }
-
-            if (newActiveId) {
-                console.log(`[LayoutManager] Setting active pane to ${newActiveId}`);
-                this.setActivePane(newActiveId);
-            } else {
-                const fallbackId = this.panes.keys().next().value;
-                if (fallbackId) this.setActivePane(fallbackId);
-            }
+            this.activateNearestPane(sibling);
         }
 
-        // レイアウト更新の完了処理
+        // 5. レイアウト更新後のCodeMirrorリフレッシュ
         requestAnimationFrame(() => {
-            console.log('[LayoutManager] Layout updated. Force refreshing styles and editors...');
+            this.refreshAllEditors();
             
-            // ルート直下に戻った場合のスタイル強制適用（念のため再適用）
-            if (grandParent === this.rootContainer) {
-                sibling.style.width = '100%';
-                sibling.style.height = '100%';
-                sibling.style.flex = '1';
-                console.log('[LayoutManager] Forced full size style for root sibling element');
+            // ルート要素直下に戻った場合、強制的に全画面スタイルを適用（念のため）
+            if (sibling.parentElement === this.rootContainer) {
+                 sibling.style.width = '100%';
+                 sibling.style.height = '100%';
             }
-
-            this.refreshLayout(sibling);
         });
     }
 
-    refreshLayout(rootElement) {
-        console.log('[LayoutManager] Refreshing layout for:', rootElement);
-        const panesToRefresh = [];
-        
-        if (rootElement.classList.contains('pane')) {
-            panesToRefresh.push(rootElement);
+    // 統合後にアクティブにするペインを探索する（深さ優先）
+    activateNearestPane(element) {
+        if (element.classList.contains('pane')) {
+            this.setActivePane(element.dataset.id);
         } else {
-            const childPanes = rootElement.querySelectorAll('.pane');
-            childPanes.forEach(p => panesToRefresh.push(p));
-        }
-
-        panesToRefresh.forEach(paneEl => {
-            const id = paneEl.dataset.id;
-            const pane = this.panes.get(id);
-            if (pane && pane.editorView) {
-                pane.editorView.requestMeasure();
+            // コンテナの場合、最初の子ペインを探す
+            const firstPane = element.querySelector('.pane');
+            if (firstPane) {
+                this.setActivePane(firstPane.dataset.id);
             }
+        }
+    }
+
+    refreshAllEditors() {
+        this.panes.forEach(pane => {
+            if (pane.editorView) pane.editorView.requestMeasure();
         });
     }
 
@@ -818,6 +804,8 @@ class LayoutManager {
         const nextPane = this.panes.get(id);
         if (nextPane) {
             nextPane.element.classList.add('active');
+            
+            // UI更新
             if(nextPane.activeFilePath) {
                 const fileData = openedFiles.get(nextPane.activeFilePath);
                 if (fileTitleInput && fileData) {
@@ -845,33 +833,35 @@ class LayoutManager {
         this.dragSource = null;
     }
 
+    // ペインの分割処理
     splitPane(targetPaneId, direction) {
         const targetPane = this.panes.get(targetPaneId);
-        if (!targetPane) return;
+        if (!targetPane) return null;
 
         const parent = targetPane.element.parentNode;
         
-        // Create a split container
+        // 分割コンテナの作成
         const splitContainer = document.createElement('div');
         splitContainer.className = `split-container ${direction === 'left' || direction === 'right' ? 'horizontal' : 'vertical'}`;
+        splitContainer.style.flex = '1'; // コンテナ自体も親の中で広がるようにする
         
-        // Replace target pane with split container
+        // ターゲットペインをコンテナで置換
         parent.replaceChild(splitContainer, targetPane.element);
         
-        // Create new pane
+        // 新しいペインを作成
         const newPaneId = this.createPane(splitContainer);
         const newPane = this.panes.get(newPaneId);
 
-        // リサイズ用の初期スタイルを設定しない（CSSのflexに任せる）
+        // スタイルリセット（Flexboxで自動調整させる）
+        targetPane.element.style.flex = '1';
         targetPane.element.style.width = '';
         targetPane.element.style.height = '';
-        targetPane.element.style.flex = '1';
         
+        newPane.element.style.flex = '1';
         newPane.element.style.width = '';
         newPane.element.style.height = '';
-        newPane.element.style.flex = '1';
 
-        // Re-attach target pane and new pane in correct order
+        // 要素の再配置
         if (direction === 'left' || direction === 'top') {
             splitContainer.appendChild(newPane.element);
             splitContainer.appendChild(targetPane.element);
@@ -896,6 +886,7 @@ class LayoutManager {
             const w = rect.width;
             const h = rect.height;
 
+            // ゾーン判定 (上下左右の20%領域)
             const threshold = 0.2;
             let zone = 'center';
 
@@ -923,6 +914,7 @@ class LayoutManager {
             const dropZone = this.currentDropZone;
             this.hideDropOverlay();
 
+            // ドロップ先のペインを特定
             let targetPaneId = null;
             let el = e.target;
             while(el && !el.classList?.contains('pane')) {
@@ -933,27 +925,37 @@ class LayoutManager {
                 targetPaneId = el.dataset.id;
             }
 
+            // 見つからなければアクティブなペインへフォールバック
             if (!targetPaneId) targetPaneId = this.activePaneId;
 
+            // 同じペインへのドロップ（Center）は何もしない
+            if (dropZone === 'center' && targetPaneId === this.dragSource.paneId) {
+                return;
+            }
+
             if (dropZone === 'center') {
+                // タブ移動
                 if (targetPaneId !== this.dragSource.paneId) {
                     const targetPane = this.panes.get(targetPaneId);
                     targetPane.openFile(this.dragSource.filePath);
                     
                     const sourcePane = this.panes.get(this.dragSource.paneId);
-                    sourcePane.closeFile(this.dragSource.filePath, true);
+                    sourcePane.closeFile(this.dragSource.filePath, true); // 移動フラグON
                     
                     this.setActivePane(targetPaneId);
                 }
             } else {
+                // 画面分割
                 const newPaneId = this.splitPane(targetPaneId, dropZone);
-                const newPane = this.panes.get(newPaneId);
-                newPane.openFile(this.dragSource.filePath);
-                
-                const sourcePane = this.panes.get(this.dragSource.paneId);
-                sourcePane.closeFile(this.dragSource.filePath, true);
-                
-                this.setActivePane(newPaneId);
+                if (newPaneId) {
+                    const newPane = this.panes.get(newPaneId);
+                    newPane.openFile(this.dragSource.filePath);
+                    
+                    const sourcePane = this.panes.get(this.dragSource.paneId);
+                    sourcePane.closeFile(this.dragSource.filePath, true);
+                    
+                    this.setActivePane(newPaneId);
+                }
             }
         });
     }
@@ -986,6 +988,7 @@ class LayoutManager {
                 dropIndicator.style.height = '50%';
                 break;
             case 'center':
+                // 全体ハイライト
                 break;
         }
     }
@@ -998,6 +1001,7 @@ class LayoutManager {
 
 const layoutManager = new LayoutManager();
 
+// グローバルスコープへの露出（既存コード互換）
 Object.defineProperty(window, 'globalEditorView', {
     get: () => layoutManager.activePane ? layoutManager.activePane.editorView : null
 });
@@ -1452,7 +1456,7 @@ if (btnExportPdf) {
     });
 }
 
-// ========== ツールバーのレスポンシブ対応 (オーバーフローメニュー) ==========
+// ========== ツールバーのレスポンシブ対応 ==========
 const toolbarLeft = document.getElementById('toolbar-left');
 const toolbarMoreBtn = document.getElementById('btn-toolbar-more');
 const toolbarOverflowMenu = document.getElementById('toolbar-overflow-menu');
