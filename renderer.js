@@ -97,7 +97,7 @@ let isPdfPreviewVisible = false;
 let pdfDocument = null;
 let pdfjsLib = null; // Dynamically loaded
 
-// PDF.js loading logic (Dynamic import to avoid resolution errors in HTML)
+// PDF.js loading logic
 async function loadPdfJs() {
     if (pdfjsLib) return pdfjsLib;
 
@@ -132,13 +132,12 @@ const shellDropdown = document.getElementById('shell-dropdown');
 
 // File System State
 let currentDirectoryPath = null;
-let openedFiles = new Map(); // Map<filePath, {content: string, fileName: string}>
+let openedFiles = new Map();
 let fileModificationState = new Map();
 let currentSortOrder = 'asc';
 
 
-// ========== ★★★ CodeMirror Helpers & Keymaps (Moved to Top) ★★★ ==========
-// これらを Pane クラスより先に定義することで ReferenceError を防ぎます
+// ========== CodeMirror Helpers & Keymaps ==========
 
 const codeLanguages = (info) => {
     const lang = String(info).trim().toLowerCase();
@@ -419,20 +418,15 @@ const pasteHandler = EditorView.domEventHandlers({
     }
 });
 
-// ★追加: ドロップ処理 (CodeMirrorへのJSON文字列挿入を防止)
 const dropHandler = EditorView.domEventHandlers({
     drop(event, view) {
-        // タブ移動のデータが含まれているかチェック
         const data = event.dataTransfer.getData('text/plain');
         try {
             const parsed = JSON.parse(data);
             if (parsed && parsed.paneId && parsed.filePath) {
-                // タブ移動のドロップなので、CodeMirrorのデフォルト動作（テキスト挿入）をキャンセル
-                // このデータは LayoutManager 側で処理されるべき
                 return true; 
             }
         } catch (e) {
-            // JSONでない場合は通常のテキストドロップとして扱う（無視してデフォルト動作に任せる）
         }
         return false;
     }
@@ -444,7 +438,7 @@ const dropHandler = EditorView.domEventHandlers({
 class Pane {
     constructor(id, parentContainer) {
         this.id = id;
-        this.files = []; // List of file paths opened in this pane
+        this.files = []; 
         this.activeFilePath = null;
         this.editorView = null;
         
@@ -497,9 +491,9 @@ class Pane {
                 themeCompartment.of(initialTheme),
                 editorStyleCompartment.of(initialStyle),
                 indentUnit.of("    "),
-                Prec.highest(keymap.of(obsidianLikeListKeymap)), // Now defined!
-                pasteHandler, // Now defined!
-                dropHandler, // ★追加: ドロップ時のJSON挿入防止
+                Prec.highest(keymap.of(obsidianLikeListKeymap)),
+                pasteHandler,
+                dropHandler,
                 history(),
                 keymap.of([
                     ...defaultKeymap,
@@ -507,7 +501,7 @@ class Pane {
                     { key: "Mod-s", run: () => { saveCurrentFile(false); return true; } }
                 ]),
                 syntaxHighlighting(defaultHighlightStyle),
-                markdown({ base: markdownLanguage, codeLanguages: codeLanguages }), // Now defined!
+                markdown({ base: markdownLanguage, codeLanguages: codeLanguages }),
                 livePreviewPlugin,
                 tablePlugin,
                 EditorView.lineWrapping,
@@ -519,7 +513,6 @@ class Pane {
                         onEditorInput(!isExternal);
                     }
                     if (update.focusChanged && update.view.hasFocus) {
-                        // Check if layoutManager is available to avoid initialization errors
                         if (typeof layoutManager !== 'undefined') {
                             layoutManager.setActivePane(this.id);
                         }
@@ -534,14 +527,12 @@ class Pane {
         });
     }
 
-    // ★追加: ペインの破棄処理（メモリリーク防止）
     destroy() {
         console.log(`[Pane] Destroying pane ${this.id}`);
         if (this.editorView) {
             this.editorView.destroy();
             this.editorView = null;
         }
-        // DOM要素の削除
         if (this.element && this.element.parentNode) {
             this.element.parentNode.removeChild(this.element);
         }
@@ -607,14 +598,11 @@ class Pane {
         this.updateTabs();
     }
 
-    // ★修正: isMoving フラグを追加して、移動時は未保存状態を消さないようにする
-    // ★追加: ファイルリストが空になったらペインを削除する
     closeFile(filePath, isMoving = false) {
         const index = this.files.indexOf(filePath);
         if (index > -1) {
             this.files.splice(index, 1);
             if (this.activeFilePath === filePath) {
-                // Switch to adjacent file or clear editor
                 const nextFile = this.files[index] || this.files[index - 1];
                 if (nextFile) {
                     this.switchToFile(nextFile);
@@ -626,8 +614,6 @@ class Pane {
             this.updateTabs();
         }
 
-        // 移動でない場合のみ、グローバルなファイル管理から削除する
-        // ただし、他のペインで開かれている場合は削除しない
         if (!isMoving) {
             let isOpenedElsewhere = false;
             if (typeof layoutManager !== 'undefined') {
@@ -637,13 +623,11 @@ class Pane {
             }
 
             if (!isOpenedElsewhere) {
-                // 完全に閉じる場合のみ削除
                 openedFiles.delete(filePath);
-                fileModificationState.delete(filePath); // 未保存フラグも削除
+                fileModificationState.delete(filePath);
             }
         }
 
-        // ★追加: ファイルが0になったらペイン削除をリクエスト
         if (this.files.length === 0) {
             console.log(`[Pane] Pane ${this.id} is now empty.`);
             if (typeof layoutManager !== 'undefined') {
@@ -671,7 +655,6 @@ class Pane {
         
         if (isPdfPreviewVisible) generatePdfPreview();
         
-        // Update window title
         if (fileData) {
             document.title = `${fileData.fileName} - Markdown IDE`;
         }
@@ -696,12 +679,9 @@ class LayoutManager {
         this.activePaneId = null;
         this.paneCounter = 0;
         this.rootContainer = document.getElementById('pane-root');
-        this.dragSource = null; // { paneId, filePath }
-        
-        // Constructor does NOT initialize root anymore to avoid TDZ
+        this.dragSource = null;
     }
 
-    // Explicit initialization method
     init() {
         console.log('[LayoutManager] Initializing root pane');
         this.initRoot();
@@ -715,18 +695,15 @@ class LayoutManager {
 
     createPane(container) {
         const id = `pane-${++this.paneCounter}`;
-        // At this point layoutManager variable might be TDZ if called from constructor, 
-        // but safe if called from init() after variable declaration.
         const pane = new Pane(id, container);
         this.panes.set(id, pane);
         return id;
     }
 
-    // ★追加: ペイン削除とレイアウト統合機能（修正版）
+    // ★修正: ペイン削除時にスタイルを確実にリセットして全画面に戻す
     removePane(paneId) {
         console.log(`[LayoutManager] Request to remove pane: ${paneId}`);
 
-        // 最後の1つのペインは削除しない
         if (this.panes.size <= 1) {
             console.log('[LayoutManager] Cannot remove last remaining pane.');
             return;
@@ -741,17 +718,13 @@ class LayoutManager {
         const paneElement = paneToRemove.element;
         const parentContainer = paneElement.parentElement; // split-container
 
-        // ルート直下の場合（panes.size > 1なら通常はsplit-container内だが、念のため）
         if (!parentContainer || !parentContainer.classList.contains('split-container')) {
-            console.warn('[LayoutManager] Cannot remove pane directly under root if multiple panes exist (structure mismatch).');
+            console.warn('[LayoutManager] Cannot remove pane directly under root if multiple panes exist.');
             return;
         }
 
-        // 親コンテナ (split-container) と、その親 (grandParent) を取得
         const grandParent = parentContainer.parentElement;
         
-        // 兄弟要素（残る方）を特定。単に !== paneElement だけでなくクラスも確認
-        // split-container には2つの要素（paneまたはsplit-container）が入っているはず
         const sibling = Array.from(parentContainer.children).find(child => 
             child !== paneElement && 
             (child.classList.contains('pane') || child.classList.contains('split-container'))
@@ -762,72 +735,76 @@ class LayoutManager {
             return;
         }
 
-        console.log('[LayoutManager] Removing pane:', paneId);
-        console.log('[LayoutManager] Collapsing split container. Promoting sibling element.');
+        console.log(`[LayoutManager] Promoting sibling: ${sibling.className} (id: ${sibling.dataset.id || 'container'})`);
+        console.log('[LayoutManager] Clearing sibling styles before promotion...');
 
-        // DOM操作: grandParent内の parentContainer(split-container) を sibling で置き換える
-        // これにより split-container が消滅し、残ったペイン（またはコンテナ）が親階層に昇格する
+        // ★重要: 昇格する要素のスタイル（リサイズ等で付与されたもの）を確実に消去する
+        // これをしないと、width: 50% などが残って全画面にならない
+        sibling.style.width = '';
+        sibling.style.height = '';
+        sibling.style.flex = '';
+        sibling.style.flexBasis = '';
+        sibling.style.flexGrow = '';
+        sibling.style.flexShrink = '';
+
+        // DOM置換: 親コンテナを削除し、兄弟要素を親の親に直結させる
         grandParent.replaceChild(sibling, parentContainer);
 
-        // ペインのクリーンアップ
+        // ペインオブジェクトの破棄
         paneToRemove.destroy();
         this.panes.delete(paneId);
 
-        // ★重要: レイアウト変更後の強制リフレッシュ
-        // 昇格した要素（sibling）以下のすべてのペインに対して requestMeasure を呼ぶ
-        this.refreshLayout(sibling);
-
-        // アクティブペインの再設定
-        // 削除したペインがアクティブだった場合、代わりのペインをアクティブにする
+        // アクティブペインの調整
         if (this.activePaneId === paneId) {
             let newActiveId = null;
-
-            // sibling自体がペインの場合
             if (sibling.classList.contains('pane')) {
                 newActiveId = sibling.dataset.id;
             } else {
-                // siblingがコンテナの場合、その中の最初のペインを探す（深さ優先）
                 const firstPaneEl = sibling.querySelector('.pane');
-                if (firstPaneEl) {
-                    newActiveId = firstPaneEl.dataset.id;
-                }
+                if (firstPaneEl) newActiveId = firstPaneEl.dataset.id;
             }
 
             if (newActiveId) {
                 console.log(`[LayoutManager] Setting active pane to ${newActiveId}`);
                 this.setActivePane(newActiveId);
             } else {
-                // フォールバック: マップ内の適当なペインを選択
                 const fallbackId = this.panes.keys().next().value;
-                if (fallbackId) {
-                    console.log(`[LayoutManager] Fallback active pane to ${fallbackId}`);
-                    this.setActivePane(fallbackId);
-                }
+                if (fallbackId) this.setActivePane(fallbackId);
             }
         }
+
+        // レイアウト更新の完了処理
+        requestAnimationFrame(() => {
+            console.log('[LayoutManager] Layout updated. Force refreshing styles and editors...');
+            
+            // ルート直下に戻った場合のスタイル強制適用（念のため再適用）
+            if (grandParent === this.rootContainer) {
+                sibling.style.width = '100%';
+                sibling.style.height = '100%';
+                sibling.style.flex = '1';
+                console.log('[LayoutManager] Forced full size style for root sibling element');
+            }
+
+            this.refreshLayout(sibling);
+        });
     }
 
-    // ★追加: 指定要素以下のすべてのペインのエディタをリフレッシュするヘルパー
     refreshLayout(rootElement) {
         console.log('[LayoutManager] Refreshing layout for:', rootElement);
         const panesToRefresh = [];
         
-        // rootElement自体がpaneの場合
         if (rootElement.classList.contains('pane')) {
             panesToRefresh.push(rootElement);
+        } else {
+            const childPanes = rootElement.querySelectorAll('.pane');
+            childPanes.forEach(p => panesToRefresh.push(p));
         }
-        
-        // 子孫のpaneを取得
-        const childPanes = rootElement.querySelectorAll('.pane');
-        childPanes.forEach(p => panesToRefresh.push(p));
 
         panesToRefresh.forEach(paneEl => {
             const id = paneEl.dataset.id;
             const pane = this.panes.get(id);
             if (pane && pane.editorView) {
-                // CodeMirrorにレイアウト計測を要求し、再描画させる
                 pane.editorView.requestMeasure();
-                console.log(`[LayoutManager] Requested measure for pane ${id}`);
             }
         });
     }
@@ -842,7 +819,6 @@ class LayoutManager {
         if (nextPane) {
             nextPane.element.classList.add('active');
             if(nextPane.activeFilePath) {
-                // Update global UI based on active file
                 const fileData = openedFiles.get(nextPane.activeFilePath);
                 if (fileTitleInput && fileData) {
                      const fileName = fileData.fileName;
@@ -886,6 +862,15 @@ class LayoutManager {
         const newPaneId = this.createPane(splitContainer);
         const newPane = this.panes.get(newPaneId);
 
+        // リサイズ用の初期スタイルを設定しない（CSSのflexに任せる）
+        targetPane.element.style.width = '';
+        targetPane.element.style.height = '';
+        targetPane.element.style.flex = '1';
+        
+        newPane.element.style.width = '';
+        newPane.element.style.height = '';
+        newPane.element.style.flex = '1';
+
         // Re-attach target pane and new pane in correct order
         if (direction === 'left' || direction === 'top') {
             splitContainer.appendChild(newPane.element);
@@ -899,7 +884,7 @@ class LayoutManager {
     }
 
     setupDragDrop() {
-        const container = document.getElementById('content-readme'); // Covers entire editor area
+        const container = document.getElementById('content-readme'); 
         
         container.addEventListener('dragover', (e) => {
             e.preventDefault();
@@ -911,8 +896,6 @@ class LayoutManager {
             const w = rect.width;
             const h = rect.height;
 
-            // Determine zones (Center, Top, Bottom, Left, Right)
-            // Simple logic: 20% from edges
             const threshold = 0.2;
             let zone = 'center';
 
@@ -933,16 +916,14 @@ class LayoutManager {
 
         container.addEventListener('drop', (e) => {
             e.preventDefault();
-            e.stopPropagation(); // ★重要: エディタや他のハンドラへの伝播を止める
+            e.stopPropagation();
             
             if (!this.dragSource) return;
             
             const dropZone = this.currentDropZone;
             this.hideDropOverlay();
 
-            // Find the pane under the drop (approximation, assume drop target is within a pane)
             let targetPaneId = null;
-            // Traverse up from e.target to find .pane
             let el = e.target;
             while(el && !el.classList?.contains('pane')) {
                 el = el.parentElement;
@@ -952,30 +933,24 @@ class LayoutManager {
                 targetPaneId = el.dataset.id;
             }
 
-            if (!targetPaneId) targetPaneId = this.activePaneId; // Fallback
+            if (!targetPaneId) targetPaneId = this.activePaneId;
 
             if (dropZone === 'center') {
-                // Move tab to target pane
                 if (targetPaneId !== this.dragSource.paneId) {
                     const targetPane = this.panes.get(targetPaneId);
                     targetPane.openFile(this.dragSource.filePath);
                     
                     const sourcePane = this.panes.get(this.dragSource.paneId);
-                    // ★修正: 移動フラグをtrueにして閉じる（未保存状態を維持）
-                    // sourcePane.closeFile 内で files が空になれば removePane が呼ばれる
                     sourcePane.closeFile(this.dragSource.filePath, true);
                     
                     this.setActivePane(targetPaneId);
                 }
             } else {
-                // Split
                 const newPaneId = this.splitPane(targetPaneId, dropZone);
                 const newPane = this.panes.get(newPaneId);
                 newPane.openFile(this.dragSource.filePath);
                 
-                // Typically tabs are moved.
                 const sourcePane = this.panes.get(this.dragSource.paneId);
-                // ★修正: 移動フラグをtrueにして閉じる
                 sourcePane.closeFile(this.dragSource.filePath, true);
                 
                 this.setActivePane(newPaneId);
@@ -987,7 +962,6 @@ class LayoutManager {
         this.currentDropZone = zone;
         dropOverlay.classList.remove('hidden');
         
-        // Reset styles
         dropIndicator.style.top = '0';
         dropIndicator.style.left = '0';
         dropIndicator.style.width = '100%';
@@ -1012,7 +986,6 @@ class LayoutManager {
                 dropIndicator.style.height = '50%';
                 break;
             case 'center':
-                // Full highlight
                 break;
         }
     }
@@ -1023,12 +996,8 @@ class LayoutManager {
     }
 }
 
-// Global Layout Manager Instance
 const layoutManager = new LayoutManager();
-// NOTE: We do NOT call layoutManager.initRoot() here.
-// We wait for window.load to ensure DOM is ready and variables are fully initialized.
 
-// Helper to get global view (for existing code compatibility)
 Object.defineProperty(window, 'globalEditorView', {
     get: () => layoutManager.activePane ? layoutManager.activePane.editorView : null
 });
@@ -1191,17 +1160,7 @@ const startDoc = `# Markdown IDE の使い方
 ## ✨ 高度な機能
 
 ### テーブル（表）
-ツールバーの \`Table\` ボタンで挿入できます。
-
-| 機能 | 説明 | 対応 |
-| :--- | :--- | :---: |
-| リサイズ | 列の境界線をドラッグ | ✅ |
-| 編集 | セルを直接編集 | ✅ |
-
-### ブックマークカード
-URLを貼り付けて「ブックマーク」を選択するとカード化されます。
-
-@card https://www.electronjs.org/
+ツールバーのボタンで挿入できます。
 `;
 
 // ========== エディタ操作ヘルパー (Active Paneに対して実行) ==========
@@ -2901,9 +2860,6 @@ async function saveCurrentFile(isSaveAs = false) {
     }
 }
 
-// ... (Terminal Logic omitted for brevity, kept mostly same but container logic updated) ...
-// (Assuming terminal functions work as is, just need to ensure containers exist)
-
 // ========== File Tree Helpers ==========
 
 async function initializeFileTreeWithState() {
@@ -3167,10 +3123,9 @@ async function handleDrop(e) {
     const srcPath = e.dataTransfer.getData('text/plain');
     if (!srcPath) return;
 
-    // Check if dragging from tabs (JSON data)
     try {
         const jsonData = JSON.parse(srcPath);
-        if (jsonData.paneId) return; // Tab drag, handled elsewhere
+        if (jsonData.paneId) return; 
     } catch(e) {}
 
     let destFolderPath;
@@ -3489,15 +3444,11 @@ async function confirmAndDelete(path) {
             const success = await window.electronAPI.deleteFile(path);
 
             if (success) {
-                // Update open files
-                // We need to check all panes
                 layoutManager.panes.forEach(pane => {
-                    // Filter files that are deleted or inside deleted folder
                     const filesToClose = pane.files.filter(fp => fp === path || fp.startsWith(path + '\\') || fp.startsWith(path + '/'));
                     filesToClose.forEach(fp => pane.closeFile(fp));
                 });
 
-                // Clean up global maps
                 for (const [filePath, _] of openedFiles) {
                     if (filePath === path || filePath.startsWith(path + '\\') || filePath.startsWith(path + '/')) {
                         openedFiles.delete(filePath);
@@ -3568,7 +3519,6 @@ window.addEventListener('load', async () => {
     console.log('[App] Window Loaded');
     console.log('Markdown IDE loaded');
 
-    // ★★★ Initialize LayoutManager first explicitly ★★★
     if (typeof layoutManager !== 'undefined') {
         layoutManager.init();
     } else {
@@ -3578,17 +3528,14 @@ window.addEventListener('load', async () => {
     await loadSettings();
     setupSettingsListeners();
 
-    // Load PDF.js eagerly to prevent delay
     setTimeout(() => {
         loadPdfJs(); 
     }, 1000);
 
-    // Initial Layout is set up by LayoutManager constructor
     showWelcomeReadme();
     
     initializeFileTree();
     setupFileExplorerEvents();
-    // updateOutline() will be called by showWelcomeReadme -> switchToFile
     updateLeftPaneWidthVariable();
     initToolbarOverflow();
 

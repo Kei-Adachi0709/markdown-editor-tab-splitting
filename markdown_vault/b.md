@@ -1,5 +1,5 @@
 ### テーブル（表）
-ツールバーの `Table` ボタンで挿入できます。{"paneId":"pane-1","filePath":"C:\\GitHubProject\\markdown-editor-tab-splitting\\markdown_vault\\b.md"}
+ツールバーの `Table` ボタンで挿入できます。
 
 | 機能 | 説明 | 対応 |
 | :--- | :--- | :---: |
