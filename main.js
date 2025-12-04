@@ -472,23 +472,39 @@ function createWindow() {
     }
   });
 
-  // webContents IDを取得（ウィンドウ破棄前に保存）
+  // webContents IDを取得
   const webContentsId = mainWindow.webContents.id;
 
-  // markdown_vault フォルダのパスを生成
+  // ★修正: markdown_vault フォルダのパスを生成
   const vaultPath = path.join(__dirname, 'markdown_vault');
 
-
-  // フォルダがないなら作る
+  // ★修正: フォルダが存在しない場合は自動作成する
   if (!fs.existsSync(vaultPath)) {
+    try {
       fs.mkdirSync(vaultPath, { recursive: true });
+      console.log(`Created vault directory at: ${vaultPath}`);
+    } catch (e) {
+      console.error(`Failed to create vault directory:`, e);
+    }
   }
 
-  // ★ここが重要：作成した vaultPath をカレントディレクトリに設定する
+  // ★重要: ここから下が不足しています。必ず追加してください！
+  // 常にこのフォルダをカレントとして設定して監視を開始
   if (fs.existsSync(vaultPath)) {
     workingDirectories.set(webContentsId, vaultPath);
     startFileWatcher(webContentsId, vaultPath);
   } else {
+    // 万が一作成失敗時はホームディレクトリ
+    const homeDir = os.homedir();
+    workingDirectories.set(webContentsId, homeDir);
+    startFileWatcher(webContentsId, homeDir);
+  }
+  // ★修正: 常にこのフォルダをカレントとして設定して監視を開始
+  if (fs.existsSync(vaultPath)) {
+    workingDirectories.set(webContentsId, vaultPath);
+    startFileWatcher(webContentsId, vaultPath);
+  } else {
+    // 万が一作成失敗時はホームディレクトリ
     const homeDir = os.homedir();
     workingDirectories.set(webContentsId, homeDir);
     startFileWatcher(webContentsId, homeDir);

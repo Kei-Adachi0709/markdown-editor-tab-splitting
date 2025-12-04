@@ -3225,19 +3225,25 @@ async function showCreationInput(isFolder) {
 }
 
 const btnOpenFolder = document.getElementById('btn-open-folder');
-if (btnOpenFolder) {
-    btnOpenFolder.addEventListener('click', async () => {
-        try {
-            if (typeof window.electronAPI?.selectFolder !== 'function') return;
-            const result = await window.electronAPI.selectFolder();
-            if (result.success && result.path) {
-                await initializeFileTree();
+    if (btnOpenFolder) {
+        btnOpenFolder.addEventListener('click', async () => {
+            console.log("🖱️ [Click] btn-open-folder clicked!"); // ★ログ追加
+
+            try {
+                if (typeof window.electronAPI?.selectFolder !== 'function') return;
+                
+                const result = await window.electronAPI.selectFolder();
+                
+                if (result.success && result.path) {
+                    await initializeFileTree();
+                }
+            } catch (error) {
+                console.error('Failed to open folder:', error);
             }
-        } catch (error) {
-            console.error('Failed to open folder:', error);
-        }
-    });
-}
+        });
+    } else {
+        console.error("❌ [Error] btn-open-folder NOT found in DOM!"); // ★要素がない場合のログ
+    }
 
 if (document.getElementById('btn-new-file')) {
     document.getElementById('btn-new-file').addEventListener('click', () => showCreationInput(false));
