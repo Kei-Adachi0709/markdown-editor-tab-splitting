@@ -268,7 +268,7 @@
             </div>
 
             <!-- 右ペイン（ターミナル/プレビュー） -->
-            <div class="right-pane hidden" id="right-pane">
+            <!-- <div class="right-pane hidden" id="right-pane">
                 <div class="terminal-header" id="terminal-header">
                     <div class="terminal-tabs-container" id="terminal-tabs-container">
                         <div class="terminal-tabs-list" id="terminal-tabs-list"></div>
@@ -291,7 +291,34 @@
                 <div id="pdf-preview-container" class="pdf-preview-content hidden">
                     <canvas id="pdf-canvas"></canvas>
                 </div>
+            </div> -->
+
+            <div class="right-pane hidden" id="right-pane">
+                <div class="terminal-header" id="terminal-header">
+                    </div>
+
+                <div id="shell-dropdown" class="hidden"></div>
+                <div id="terminal-container" class="terminal-content"></div>
+
+                <div class="pdf-preview-header hidden" id="pdf-preview-header">
+                    </div>
+                <div id="pdf-preview-container" class="pdf-preview-content hidden">
+                    <canvas id="pdf-canvas"></canvas>
+                </div>
+
+                <div id="right-markdown-container" class="editor-area hidden" style="height: 100%; display: flex; flex-direction: column;">
+                    <div id="right-pane-root" class="pane-root"></div>
+                </div>
             </div>
+
+            <div class="resizer" id="resizer-right"></div>
+
+            <div class="right-activity-bar">
+                <div class="icon" id="btn-terminal-right" title="ターミナル">💻</div>
+                <div class="icon" id="btn-pdf-preview" title="PDFプレビュー">📄</div>
+                <div class="icon" id="btn-right-markdown" title="サブエディタ">📝</div>
+            </div>
+        </div>
 
             <div class="resizer" id="resizer-right"></div>
 
