@@ -475,18 +475,22 @@ function createWindow() {
   // webContents IDを取得（ウィンドウ破棄前に保存）
   const webContentsId = mainWindow.webContents.id;
 
-  // 初期状態で開きたいフォルダ（保管庫）のパスを指定
-  const initialFolderPath = path.join(__dirname, 'markdown_vault');
+  // markdown_vault フォルダのパスを生成
+  const vaultPath = path.join(__dirname, 'markdown_vault');
 
-  if (fs.existsSync(initialFolderPath)) {
-    workingDirectories.set(webContentsId, initialFolderPath);
-    // ★追加: 初期フォルダの監視開始
-    startFileWatcher(webContentsId, initialFolderPath);
+
+  // フォルダがないなら作る
+  if (!fs.existsSync(vaultPath)) {
+      fs.mkdirSync(vaultPath, { recursive: true });
+  }
+
+  // ★ここが重要：作成した vaultPath をカレントディレクトリに設定する
+  if (fs.existsSync(vaultPath)) {
+    workingDirectories.set(webContentsId, vaultPath);
+    startFileWatcher(webContentsId, vaultPath);
   } else {
-    // 指定したパスが無い場合はホームディレクトリにする（安全策）
     const homeDir = os.homedir();
     workingDirectories.set(webContentsId, homeDir);
-    // ★追加: ホームディレクトリの監視開始
     startFileWatcher(webContentsId, homeDir);
   }
 

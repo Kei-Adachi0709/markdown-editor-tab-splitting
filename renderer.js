@@ -841,9 +841,13 @@ class LayoutManager {
     }
 
     // ★修正: 完全なドラッグ＆ドロップロジック
+    // class LayoutManager の中にある setupDragDrop メソッド全体をこれに置き換えてください
     setupDragDrop() {
         const container = document.getElementById(this.dropZoneId);
-        if (!container) return;
+        if (!container) {
+            console.warn(`⚠️ [LayoutManager:${this.rootId}] DropZone container (#${this.dropZoneId}) not found.`);
+            return;
+        }
         
         // オーバーレイ要素の取得（なければ作成）
         let dropOverlay = document.getElementById(`drop-overlay-${this.rootId}`);
@@ -851,14 +855,11 @@ class LayoutManager {
             dropOverlay = document.createElement('div');
             dropOverlay.id = `drop-overlay-${this.rootId}`;
             dropOverlay.className = 'drop-overlay hidden';
-            // CSSで .drop-overlay { position: absolute; pointer-events: none; ... } が必要
-            // 既存の #drop-overlay があればそれを使い回す実装も可
-            if (document.getElementById('drop-overlay')) {
-                dropOverlay = document.getElementById('drop-overlay');
-            } else {
-                document.body.appendChild(dropOverlay);
-            }
+            dropOverlay.style.pointerEvents = 'none'; // 重要：クリックを透過させる
+            document.body.appendChild(dropOverlay);
         }
+
+        // --- ここからイベントリスナー ---
 
         container.addEventListener('dragover', (e) => {
             e.preventDefault();
@@ -870,9 +871,9 @@ class LayoutManager {
             const w = rect.width;
             const h = rect.height;
             
-            // 領域判定 (Zoneの定義)
+            // 領域判定
             let zone = 'center';
-            const threshold = 50; // 端からのピクセル数
+            const threshold = 50; 
 
             if (x < threshold) zone = 'left';
             else if (x > w - threshold) zone = 'right';
@@ -886,7 +887,6 @@ class LayoutManager {
         container.addEventListener('dragleave', (e) => {
             e.preventDefault();
             e.stopPropagation();
-            // オーバーレイ自体からのleaveは無視したいが、簡易的に隠す
             this.hideDropOverlay(dropOverlay);
         });
 
@@ -895,15 +895,10 @@ class LayoutManager {
             e.stopPropagation();
             this.hideDropOverlay(dropOverlay);
 
-            // ファイルドロップまたはタブ移動の処理
             if (this.dragSource) {
-                // タブ移動ロジック（簡易実装: 同じペインなら何もしない、違うなら開く）
                 if (this.activePane) {
                      this.activePane.openFile(this.dragSource.filePath);
                 }
-            } else if (e.dataTransfer.files.length > 0) {
-                // 外部ファイルドロップ
-                // (実装に合わせて openFileFromPath 等を呼ぶ)
             }
             
             this.clearDragSource();

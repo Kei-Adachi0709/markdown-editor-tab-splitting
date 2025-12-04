@@ -2010,3 +2010,34 @@ body[data-theme="dark"] .skeleton-box {
 .drop-overlay.hidden {
     display: none;
 }
+
+/* styles.css の一番下に追加 */
+
+/* ドラッグ用の幕（クリックを透過させる） */
+.drop-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none !important; /* ★ここが最重要 */
+    z-index: 9999;
+    background-color: transparent; /* デバッグのため一旦透明に戻す */
+    display: none;
+}
+
+/* 幕が表示されるとき */
+.drop-overlay:not(.hidden) {
+    display: block;
+}
+
+/* 右サイドバーを「幕」よりさらに手前に持ってくる */
+.right-activity-bar {
+    z-index: 2147483647 !important; /* CSSで設定できる最大値 */
+    pointer-events: auto !important;
+}
+
+/* 左サイドバーも念のため手前に */
+.activity-bar {
+    z-index: 2147483647 !important;
+}
